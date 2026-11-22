@@ -28,7 +28,8 @@ return function(s)
 	end)
 end
 ```
-- Client: `click`, `fill(path, text, { submit = true })`, `key("E", { hold = 1 })`, `get`, `waitFor`, `isInViewport`, `character`, `moveTo(Vector3)`, `call(name)` (for `s.client(name, fn)`), `leave()`.
+- Client: `click`, `fill(path, text, { submit = true })`, `key("E")`, `get`, `waitFor`, `isInViewport`, `character`, `moveTo(Vector3)`, `equip(tool)`, `activate()`, `clickWorld(partPath)`, `prompt(promptPath)`, `call(name)` (for `s.client(name, fn)`), `leave()`.
+- `s.failOnErrors()` fails tests on game script errors. `t.gameErrors()` lists them.
 - Spec: `s.isolated()` or `{ isolated = true }` for a fresh session. `s.devices({ "iphone_7", "ipad_a16" })` to test screen sizes. `s.beforeEach`, `s.afterEach`, `s.skip`, `s.only`.
 - Paths are relative to LocalPlayer unless they start with `game.`. The last segment may be a property or `@Attribute`.
 
@@ -40,6 +41,6 @@ Poll `RehearseBridge:GetAttribute("Status")` every few seconds until it's `"done
 
 ## 4. Act on the report
 - `ok: true`: done. Report what was verified.
-- Test `status: "fail"`: the game or the spec is wrong. Read `error` and `logs`, fix the game code, and rerun only that spec (`filter`) or test (`grep`).
+- Test `status: "fail"`: the game or the spec is wrong. Read `error`, then `gameErrors` (often the real cause), then `snapshot.visible` (what was on screen). Fix the game code and rerun only that spec (`filter`) or test (`grep`).
 - Test `status: "error"`: the session failed to start (environment). Rerun once, then report it.
 - Never loosen an assertion just to make it pass. Don't call `start_stop_play` during a run.

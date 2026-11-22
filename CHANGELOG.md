@@ -3,6 +3,18 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+### Added
+- Game script error capture. Each test lists the `gameErrors` and `gameWarnings` logged on the server and every client during it. Known Studio noise is ignored, and `s.ignoreErrors({...})` adds patterns.
+- `s.failOnErrors()` and the CLI's `--fail-on-errors` (bridge option `failOnErrors`) fail a test when game scripts log errors. `t.gameErrors()` reads them mid-test.
+- Failure snapshots: a failed test records what each client saw (visible UI with paths, text and rects; position, health, equipped tool, focused TextBox). Also available as `client:snapshot()`.
+- World and tool actions: `equip`, `unequip`, `activate`, `clickWorld` (parts, models, attachments or a Vector3) and `prompt` (walks into range and holds the ProximityPrompt, retrying until it triggers).
+- The client proxy passes any method through to the agent, so new commands don't need server-side wiring.
+- Example game: a coin pickup, a ProximityPrompt shop selling a Sword, a mouse-reading Paintbrush tool, a deliberate script error, and a Shop spec covering them.
+
+### Changed
+- The session watchdog's slack went from 60s to 45s, so stuck sessions are recovered sooner.
+
 ## [0.1.0] - 2026-11-22
 ### Added
 - Command-line runner (`lune run cli/rehearse run|list <place>`). It opens the place in Studio with `-task RunScript`, reads the report from Studio's log, and closes Studio and any leftover test windows. Supports `--json`, `--junit`, `--report`, `--filter`, `--grep`, `--retries`, `--timeout`, `--stall` and `--keep-open`. Exit codes: 0 passed, 1 failed, 2 couldn't run.

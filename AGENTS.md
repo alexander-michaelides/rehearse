@@ -34,7 +34,9 @@ return function(s)
 end
 ```
 - Prefer `waitFor` over `t.wait`. Every client action already waits for its target (5s default).
-- Client actions: `click`, `fill`, `key` (`{ hold = sec }`), `type`, `get`, `exists`, `waitFor`, `isVisible`, `isInViewport`, `character`, `moveTo`, `call`, `leave`.
+- Client actions: `click`, `fill`, `key`, `type`, `get`, `exists`, `waitFor`, `isVisible`, `isInViewport`, `character`, `moveTo`, `equip`, `unequip`, `activate`, `clickWorld`, `prompt`, `snapshot`, `call`, `leave`.
+- To walk, use `moveTo`. Held keys don't register in the unfocused test-client windows.
+- Use `s.failOnErrors()` (or `--fail-on-errors`) when the change shouldn't introduce script errors. `t.gameErrors()` returns them mid-test.
 - UI across screens: `s.devices({ "iphone_7", "ipad_a16" })` and assert `client:isInViewport(path)`.
 - Full API: [README.md](README.md#spec-api).
 
@@ -79,7 +81,10 @@ lune run cli/rehearse run build/Game.rbxlx --json --quiet > report.json; echo $?
     "sessionSeconds": 11.6, "joinSeconds": 7.1, "retried": null,
     "tests": [
       { "name": "…", "status": "pass", "ms": 748 },
-      { "name": "…", "status": "fail", "ms": 34, "error": "client(1) click(\"PlayerGui.Menu.Play\"): timed out after 5s waiting for PlayerGui.Menu.Play to be visible", "logs": ["…"] }
+      { "name": "…", "status": "fail", "ms": 34, "error": "client(1) click(\"PlayerGui.Menu.Play\"): timed out after 5s waiting for PlayerGui.Menu.Play to be visible", "logs": ["…"],
+        "gameErrors": ["client(1): Players.Player1.PlayerScripts.Menu:12: attempt to index nil with 'Frame'"],
+        "snapshot": { "client(1)": { "viewport": [1038, 499], "position": [0, 3, 0], "health": 100, "tool": null, "focused": null,
+          "visible": [{ "path": "PlayerGui.Loading.Label", "class": "TextLabel", "text": "Loading…", "rect": [400, 200, 240, 40] }] } } }
     ]
   }, {
     "spec": "Mobile", "device": { "id": "iphone_7" }, "status": "error", "attempts": 2,
@@ -91,7 +96,7 @@ lune run cli/rehearse run build/Game.rbxlx --json --quiet > report.json; echo $?
 }
 ```
 - `ok` is true only when nothing failed or errored.
-- A test with `status: "fail"` ran, and its assertion or action failed. Read `error`, then fix the game code or the spec.
+- A test with `status: "fail"` ran, and its assertion or action failed. Read `error` first, then `gameErrors` (a script error is often the real cause), then `snapshot.visible` for what was actually on screen. Then fix the game code or the spec.
 - A test with `status: "error"` never ran because its session failed (see the session's `error`). That's an environment problem, not a test result. Rerun once. If it repeats, report it.
 - If the bridge's `Hung` attribute is set, a session is stuck inside Studio. Through the MCP you can't end it. Ask the user to press Stop in Studio, or use the CLI, which closes stuck sessions itself.
 
