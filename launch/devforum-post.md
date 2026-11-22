@@ -15,15 +15,12 @@ When `StudioTestService` and `VirtualInput` came out ([announcement](https://dev
 
 Rehearse is my attempt at that missing layer. You write a short spec. Rehearse starts a real Studio test session with up to 8 clients, drives each one with real input, checks state on the server and the clients, and gives you a pass/fail report. You can run it from a toolbar button, from a terminal, or have an AI agent run it through the Studio MCP.
 
-<!-- media/tour.mp4 (upload as video) or media/tour.gif: a real Rehearse test session recorded with
-     the Studio MCP in solo mode. Nobody touches the keyboard: the spec types a name, walks to the coin,
-     buys a sword at the shop prompt, swings it, and clicks the canvas with a paint tool. The avatar is
-     the poster's own account, because solo mode uses the signed-in user. -->
-![A Rehearse spec playing the example game by itself](media/tour.gif)
+<!-- media/agent-demo.mp4: upload as video. A real, unscripted Claude Code session: given only the bug
+     report, it writes a 2-player Rehearse test, watches it fail, fixes the server and reruns. Waits are
+     sped up (marked 8x/10x); everything else is real time. -->
+![Claude Code reproduces and fixes a multiplayer bug with Rehearse](media/agent-demo.mp4)
 
-*No hands: the spec does the typing, walking, buying and clicking. The pauses between steps were added so it's watchable.*
-
-![Rehearse CLI output](media/cli-run.gif)
+*A real Claude Code session, given only a bug report: "if someone presses Play and then leaves, the match starts for everyone else." It writes a 2-player Rehearse test, sees it fail (`expected: true to be false`), fixes the server's ready counter, and the suite goes green. Waiting is sped up.*
 
 ## What a spec looks like
 
