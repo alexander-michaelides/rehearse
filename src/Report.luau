@@ -49,6 +49,9 @@ function Report.text(report: any): string
 			meta ..= `, {s.replacedClients} client(s) replaced`
 		end
 		table.insert(lines, `  {Report.sessionLabel(s)} [{meta}]{if s.error then " ERROR: " .. s.error else ""}`)
+		for _, e in s.startupErrors or {} do
+			table.insert(lines, `    startup script error: {e}`)
+		end
 		for _, t in s.tests or {} do
 			if t.status == "error" and s.error then
 				table.insert(lines, `    {ICON.error} {t.name} (not run)`)
@@ -139,6 +142,9 @@ function Report.junit(report: any): string
 					t.reason
 				)}"/></testcase>`
 			)
+		end
+		if session and session.startupErrors then
+			table.insert(out, `    <system-err>{xmlEscape(table.concat(session.startupErrors, "\n"))}</system-err>`)
 		end
 		table.insert(out, "  </testsuite>")
 	end

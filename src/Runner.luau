@@ -28,20 +28,36 @@ local function resolveFullName(fullName: string): Instance?
 	return current
 end
 
+-- Polls `predicate` every frame until it returns a truthy value. The timeout holds even if
+-- the predicate yields (for example a WaitForChild inside it): each poll runs in its own thread.
 local function waitFor(predicate: () -> any, timeout: number?, what: string?): any
 	local limit = timeout or 5
 	local deadline = os.clock() + limit
+	local lastErr: any = nil
+	local yielding = false
 	while true do
-		local ok, value = pcall(predicate)
-		if ok and value then
+		local finished, ok, value = false, false, nil
+		local thread = task.spawn(function()
+			ok, value = pcall(predicate)
+			finished = true
+		end)
+		while not finished and os.clock() <= deadline do
+			RunService.Heartbeat:Wait()
+		end
+		if not finished then
+			task.cancel(thread)
+			yielding = true
+		elseif ok and value then
 			return value
+		elseif not ok then
+			lastErr = value
 		end
 		if os.clock() > deadline then
-			error(
-				`timed out after {limit}s waiting for {what or "condition"}`
-					.. (if not ok then ` (last error: {value})` else ""),
-				0
-			)
+			local detail = if yielding
+				then " (the check was still waiting on something; avoid WaitForChild or wait() inside waitFor)"
+				elseif lastErr then ` (last error: {lastErr})`
+				else ""
+			error(`timed out after {limit}s waiting for {what or "condition"}{detail}`, 0)
 		end
 		RunService.Heartbeat:Wait()
 	end
@@ -175,6 +191,29 @@ local function run(args: { [string]: any }): { [string]: any }
 		end
 	end
 
+	-- beforeJoin hooks run before any client is admitted; their logs stay with the session.
+	local setupLogs = {}
+	if #decl.beforeJoin > 0 then
+		local setupCtx = {
+			waitFor = waitFor,
+			expect = Expect,
+			device = args.device,
+			log = function(...)
+				local parts = {}
+				for i = 1, select("#", ...) do
+					parts[i] = tostring((select(i, ...)))
+				end
+				table.insert(setupLogs, table.concat(parts, " "))
+			end,
+		}
+		for _, hook in decl.beforeJoin do
+			local okHook, hookErr = pcall(hook, setupCtx)
+			if not okHook then
+				return { status = "error", error = `beforeJoin: {hookErr}`, tests = {}, setupLogs = setupLogs }
+			end
+		end
+	end
+
 	local joinStarted = os.clock()
 	local okAdmit, admitErr = pcall(admit, decl.players, CLIENT_JOIN_TIMEOUT, TOP_UP_AFTER)
 	if not okAdmit then
@@ -252,8 +291,24 @@ local function run(args: { [string]: any }): { [string]: any }
 	end
 
 	-- Game script errors and warnings, from the server and every client, per test.
+	-- Seeded with what was logged before Rehearse started (game scripts run first).
 	local serverLog: { { kind: string, message: string } } = {}
-	game:GetService("LogService").MessageOut:Connect(function(message, messageType)
+	local LogService = game:GetService("LogService")
+	pcall(function()
+		for _, entry in LogService:GetLogHistory() do
+			local mt = entry.messageType
+			if
+				(mt == Enum.MessageType.MessageError or mt == Enum.MessageType.MessageWarning)
+				and string.sub(entry.message, 1, 10) ~= "[Rehearse]"
+			then
+				table.insert(serverLog, {
+					kind = if mt == Enum.MessageType.MessageError then "error" else "warning",
+					message = string.sub(entry.message, 1, 500),
+				})
+			end
+		end
+	end)
+	LogService.MessageOut:Connect(function(message, messageType)
 		if string.sub(message, 1, 10) == "[Rehearse]" then
 			return
 		end
@@ -336,6 +391,23 @@ local function run(args: { [string]: any }): { [string]: any }
 		end
 		return false
 	end
+
+	-- Everything logged while the session started up and players joined.
+	local startupErrors, startupWarnings = {}, {}
+	do
+		local startupLog = {}
+		for _, e in serverLog do
+			table.insert(startupLog, { kind = e.kind, message = `server: {e.message}` })
+		end
+		drainClientLogs(startupLog)
+		for _, e in startupLog do
+			local list = if e.kind == "error" then startupErrors else startupWarnings
+			if #list < 20 and not ignored(e.message) then
+				table.insert(list, e.message)
+			end
+		end
+	end
+	local startupReported = false
 
 	local results = {}
 	for index, test in decl.tests do
@@ -457,6 +529,12 @@ local function run(args: { [string]: any }): { [string]: any }
 		if ok and failOnErrors and #gameErrors > 0 then
 			ok, err = false, `{#gameErrors} game script error(s) during the test (failOnErrors): {gameErrors[1]}`
 		end
+		if ok and failOnErrors and #startupErrors > 0 and not startupReported then
+			ok, err =
+				false,
+				`{#startupErrors} game script error(s) while the session started (failOnErrors): {startupErrors[1]}`
+		end
+		startupReported = true
 
 		table.insert(results, {
 			name = test.name,
@@ -473,6 +551,9 @@ local function run(args: { [string]: any }): { [string]: any }
 	return {
 		status = "ran",
 		tests = results,
+		startupErrors = if #startupErrors > 0 then startupErrors else nil,
+		setupLogs = if #setupLogs > 0 then setupLogs else nil,
+		startupWarnings = if #startupWarnings > 0 then startupWarnings else nil,
 		joinSeconds = joinSeconds,
 		replacedClients = if toppedUp > 0 then toppedUp else nil,
 	}

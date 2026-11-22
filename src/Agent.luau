@@ -131,13 +131,12 @@ local function isRendered(obj: GuiObject): boolean
 	return false
 end
 
-local function insetFor(obj: GuiObject): Vector2
-	local gui = obj:FindFirstAncestorWhichIsA("ScreenGui")
-	if gui and not gui.IgnoreGuiInset then
-		local inset = GuiService:GetGuiInset()
-		return inset
-	end
-	return Vector2.zero
+-- AbsolutePosition is measured from below the top bar for every ScreenGui (even with
+-- IgnoreGuiInset, whose objects just get negative coordinates), while VirtualInput and
+-- Camera.ViewportSize use the full window. So screen = AbsolutePosition + inset, always.
+local function insetFor(_obj: GuiObject): Vector2
+	local inset = GuiService:GetGuiInset()
+	return inset
 end
 
 local function screenRect(obj: GuiObject): (Vector2, Vector2)
@@ -155,17 +154,48 @@ local function inViewport(obj: GuiObject): boolean
 	return a.X >= 0 and a.Y >= 0 and b.X <= size.X + 0.5 and b.Y <= size.Y + 0.5
 end
 
-local function guiAt(path: string, timeout: number, requireInteractable: boolean): GuiObject
-	return waitUntil(function()
-		local inst = resolveInstance(path)
-		if inst and inst:IsA("GuiObject") and isRendered(inst) then
-			if requireInteractable and inst:IsA("GuiButton") and not inst.Active then
-				return nil
-			end
-			return inst
+-- Why a GuiObject can't be clicked right now, or nil if it can.
+local function notClickable(path: string, needOnScreen: boolean): string?
+	local inst = resolveInstance(path)
+	if not inst then
+		local parent, member = resolve(path)
+		if parent and member then
+			return `{path} doesn't exist ({parent:GetFullName()} has no child "{member}")`
 		end
-		return nil
-	end, timeout, `{path} to be visible`)
+		return `{path} doesn't exist`
+	end
+	if not inst:IsA("GuiObject") then
+		return `{path} is a {inst.ClassName}, not a GuiObject`
+	end
+	if not isRendered(inst) then
+		return `{path} exists but isn't rendered (it, an ancestor or its ScreenGui is hidden)`
+	end
+	if needOnScreen then
+		local camera = workspace.CurrentCamera
+		local a, b = screenRect(inst)
+		local centre = (a + b) / 2
+		local size = camera and camera.ViewportSize or Vector2.zero
+		if centre.X < 0 or centre.Y < 0 or centre.X > size.X or centre.Y > size.Y then
+			return `{path} is rendered but its centre ({math.floor(centre.X)}, {math.floor(centre.Y)}) is off screen ({math.floor(
+				size.X
+			)}x{math.floor(size.Y)})`
+		end
+	end
+	return nil
+end
+
+local function guiAt(path: string, timeout: number, needOnScreen: boolean): GuiObject
+	local deadline = os.clock() + timeout
+	while true do
+		local why = notClickable(path, needOnScreen)
+		if not why then
+			return resolveInstance(path) :: GuiObject
+		end
+		if os.clock() > deadline then
+			error(`timed out after {timeout}s: {why}`, 0)
+		end
+		frame()
+	end
 end
 
 local BUTTONS = {
@@ -651,6 +681,9 @@ local function relPath(inst: Instance): string
 	return table.concat(parts, ".")
 end
 
+-- ScreenGuis Roblox adds itself; left out of snapshots.
+local ROBLOX_GUIS = { Chat = true, BubbleChat = true, Freecam = true, TouchGui = true, ControlGui = true }
+
 -- Returns (and clears) client errors and warnings logged since the last drain.
 function commands.drainLogs(): any
 	local out = logBuffer
@@ -666,6 +699,10 @@ function commands.snapshot(): any
 	local total = 0
 	if gui then
 		for _, d in gui:GetDescendants() do
+			local screen = d:FindFirstAncestorWhichIsA("LayerCollector")
+			if screen and ROBLOX_GUIS[screen.Name] then
+				continue
+			end
 			if d:IsA("GuiObject") and isRendered(d) then
 				local text = if d:IsA("TextLabel")
 						or d:IsA("TextButton")
@@ -751,6 +788,19 @@ function Agent.start()
 		return -- not a Rehearse session
 	end
 	currentFolder = folder
+	-- Errors logged before the agent started (game scripts run first) count too.
+	pcall(function()
+		for _, entry in game:GetService("LogService"):GetLogHistory() do
+			local mt = entry.messageType
+			if mt == Enum.MessageType.MessageError or mt == Enum.MessageType.MessageWarning then
+				table.insert(logBuffer, {
+					t = 0,
+					kind = if mt == Enum.MessageType.MessageError then "error" else "warning",
+					message = string.sub(entry.message, 1, 500),
+				})
+			end
+		end
+	end)
 	game:GetService("LogService").MessageOut:Connect(function(message, messageType)
 		if messageType == Enum.MessageType.MessageError or messageType == Enum.MessageType.MessageWarning then
 			if #logBuffer < 200 then
