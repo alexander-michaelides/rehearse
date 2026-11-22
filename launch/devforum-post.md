@@ -4,7 +4,7 @@ DRAFT for DevForum > Community Resources. Not posted. The repo owner posts it.
 Before posting:
   [ ] Make github.com/alexander-michaelides/rehearse public (the links below 404 while it's private)
   [ ] Merge the open PRs and cut the release the "Download" link points to
-  [ ] Record the demo clip (see the note at the top of the post) and upload the images in launch/media/
+  [ ] Upload the media in launch/media/ (tour.mp4 or tour.gif is the real session recording)
   [ ] Decide on Creator Store: publish the plugin there, or remove that line
   [ ] Reread the claims below against the version you release
 -->
@@ -15,8 +15,13 @@ When `StudioTestService` and `VirtualInput` came out ([announcement](https://dev
 
 Rehearse is my attempt at that missing layer. You write a short spec. Rehearse starts a real Studio test session with up to 8 clients, drives each one with real input, checks state on the server and the clients, and gives you a pass/fail report. You can run it from a toolbar button, from a terminal, or have an AI agent run it through the Studio MCP.
 
-<!-- DEMO CLIP: screen-record a run of the example place (Studio + the two client windows clicking
-     the Play button and the shop), about 15–20 s, then convert it to a GIF. Put it here. -->
+<!-- media/tour.mp4 (upload as video) or media/tour.gif: a real Rehearse test session recorded with
+     the Studio MCP in solo mode. Nobody touches the keyboard: the spec types a name, walks to the coin,
+     buys a sword at the shop prompt, swings it, and clicks the canvas with a paint tool. The avatar is
+     the poster's own account, because solo mode uses the signed-in user. -->
+![A Rehearse spec playing the example game by itself](media/tour.gif)
+
+*No hands: the spec does the typing, walking, buying and clicking. The pauses between steps were added so it's watchable.*
 
 ![Rehearse CLI output](media/cli-run.gif)
 
@@ -53,6 +58,7 @@ Every client action waits for its target first, so specs don't need `wait(2)` sp
 - **Devices:** run a spec on several simulated devices (`s.devices({ "iphone_7", "ipad_a16" })`) and check that UI is fully on screen.
 - **Script errors are part of the result.** Errors and warnings from server and client scripts during each test are recorded, and `s.failOnErrors()` makes them fail the test.
 - **Failures show what the player saw.** A failed test records each client's visible UI (paths and text), position, health and equipped tool. You can often see the problem ("the shop never opened") without reproducing it.
+- **Solo mode:** 1-player specs can run as a normal Play test in your Studio window. That's faster, and you can watch it (that's how the clip above was recorded).
 - **Reports:** readable text, JSON and JUnit XML. A CLI exits non-zero on failure, so it can gate a self-hosted CI job or a pre-publish check.
 - **Agent-friendly:** an AI agent with the Studio MCP can write a spec, run it, read the JSON, fix the game and rerun. There's an [AGENTS.md](https://github.com/alexander-michaelides/rehearse/blob/main/AGENTS.md) and a Studio skill for this.
 
