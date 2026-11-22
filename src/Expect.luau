@@ -48,7 +48,10 @@ local function build(actual: any, negate: boolean)
 		check(not actual, `{fmt(actual)} to be falsy`)
 	end
 	function m.toBeNear(expected: number, tolerance: number?)
-		check(math.abs(actual - expected) <= (tolerance or 1e-3), `{fmt(actual)} to be within {tolerance or 1e-3} of {fmt(expected)}`)
+		check(
+			math.abs(actual - expected) <= (tolerance or 1e-3),
+			`{fmt(actual)} to be within {tolerance or 1e-3} of {fmt(expected)}`
+		)
 	end
 	function m.toContain(item: any)
 		local found = false

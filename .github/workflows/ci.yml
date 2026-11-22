@@ -5,14 +5,38 @@ on:
   pull_request:
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ok-nick/setup-aftman@v0.4.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Format (StyLua)
+        run: stylua --check src example cli tests
+      - name: Lint plugin (Selene, Roblox std)
+        run: selene src example
+      - name: Lint CLI and tests (Selene, Luau std)
+        run: selene --config cli/selene.toml cli tests
+      - name: Unit tests (Lune)
+        run: lune run tests/run
       - name: Build plugin
         run: rojo build -o Rehearse.rbxm
       - name: Build example place
         run: rojo build example.project.json -o RehearseExample.rbxlx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rehearse.rbxm
+          path: Rehearse.rbxm
+
+# End-to-end specs need Roblox Studio with a signed-in user, which GitHub-hosted
+# runners don't have. On a self-hosted macOS runner with Studio installed:
+#
+#   e2e:
+#     runs-on: [self-hosted, macOS]
+#     steps:
+#       - uses: actions/checkout@v4
+#       - run: aftman install
+#       - run: rojo build -o ~/Documents/Roblox/Plugins/Rehearse.rbxm
+#       - run: rojo build example.project.json -o build/RehearseExample.rbxlx
+#       - run: lune run cli/rehearse run build/RehearseExample.rbxlx --junit results.xml

@@ -1,0 +1,5 @@
+# Plugin and example code (Roblox environment).
+std = "roblox"
+
+[lints]
+shadowing = "allow"

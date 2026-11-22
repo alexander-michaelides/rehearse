@@ -1,0 +1,5 @@
+# CLI and unit tests run under Lune.
+std = "luau"
+
+[lints]
+shadowing = "allow"
