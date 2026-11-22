@@ -1,159 +1,307 @@
 --!strict
--- Edit DataModel: starts one multiplayer test session per spec and collects reports.
---
--- Agents and command-bar code trigger runs through a non-archivable bridge:
---   local bridge = game.ServerStorage.RehearseBridge
---   bridge.Start:Invoke({ filter = "Lobby" })     -- returns runId immediately
---   bridge:GetAttribute("Status")                 -- "running" | "done"
---   bridge:GetAttribute("LastReport")             -- JSON report
---   bridge.Run:Invoke({ filter = "Lobby" })       -- same, but yields and returns the report table
+--[=[
+	@class Launcher
+
+	Edit DataModel: plans test sessions from the specs, starts each one with
+	StudioTestService:ExecuteMultiplayerTestAsync, retries sessions that fail to
+	start, and collects one report.
+
+	Agents, the CLI and command-bar code trigger runs through a non-archivable bridge:
+	```lua
+	local bridge = game.ServerStorage.RehearseBridge
+	bridge.Start:Invoke({ filter = "Lobby", grep = "match" })  -- returns "started" immediately
+	bridge:GetAttribute("Status")                             -- "idle" | "running" | "done"
+	bridge:GetAttribute("Progress")                           -- "2/5 Lobby [iphone_14]"
+	bridge:GetAttribute("LastReport")                         -- JSON report (see Report.luau)
+	bridge.Run:Invoke(opts)                                   -- same, but yields and returns the report table
+	bridge.List:Invoke(opts)                                  -- the planned sessions, without running anything
+	```
+]=]
 
 local HttpService = game:GetService("HttpService")
 local ServerStorage = game:GetService("ServerStorage")
 local StudioTestService = game:GetService("StudioTestService")
 
 local Spec = require(script.Parent.Spec)
+local Plan = require(script.Parent.Plan)
+local Report = require(script.Parent.Report)
 
 local Launcher = {}
 
-local running = false
+export type RunOptions = {
+	filter: string?, -- substring of the spec module name
+	grep: string?, -- substring of "Spec > test name" (case-insensitive)
+	retries: number?, -- extra attempts for a session that fails before its tests run (default 1)
+}
 
-local function now(): number
-	return os.clock()
+Launcher.VERSION = "0.1.0"
+
+local running = false
+local progress: ((string) -> ())? = nil
+local onHung: ((string?) -> ())? = nil
+
+-- Matches Runner's client join timeout, plus slack for session startup and shutdown.
+local SESSION_OVERHEAD = 30 + 30
+
+local function round(n: number, places: number): number
+	local m = 10 ^ places
+	return math.floor(n * m + 0.5) / m
 end
 
-local function runSpec(module: ModuleScript, runId: string): { [string]: any }
-	local started = now()
-	local ok, decl = pcall(Spec.load, module)
-	if not ok then
-		return { spec = module.Name, status = "error", error = tostring(decl), tests = {} }
+local function loadSpecs(filter: string?): ({ ModuleScript }, { any }, { any })
+	local modules = Spec.modules(filter)
+	local decls, loadErrors = {}, {}
+	local loaded: { ModuleScript } = {}
+	for _, m in modules do
+		local ok, decl = pcall(Spec.load, m, false)
+		if ok then
+			table.insert(loaded, m)
+			table.insert(decls, decl)
+		else
+			table.insert(loadErrors, { spec = m.Name, error = tostring(decl) })
+		end
 	end
-	if #decl.tests == 0 then
-		return { spec = decl.name, status = "skipped", tests = {} }
-	end
+	return loaded, decls, loadErrors
+end
 
-	local args = { rehearse = true, runId = runId, spec = module:GetFullName() }
-	local callOk, raw = pcall(function()
-		return StudioTestService:ExecuteMultiplayerTestAsync(decl.players, args)
+local function runSession(
+	module: ModuleScript,
+	session: Plan.Session,
+	runId: string,
+	position: string
+): { [string]: any }
+	local indices = {}
+	for _, t in session.tests do
+		table.insert(indices, t.index)
+	end
+	local args = {
+		rehearse = true,
+		runId = runId,
+		spec = module:GetFullName(),
+		tests = indices,
+		device = session.device,
+	}
+	-- A session started right after the previous one ends sometimes returns nil at once
+	-- (old session processes still shutting down); a short pause avoids most of those.
+	task.wait(1)
+	if progress then
+		progress(`{position} {Report.sessionLabel(session)} ({session.players}p)`)
+	end
+	-- Watchdog: Studio occasionally never finishes a session (its server or clients don't start).
+	-- Edit can't cancel a session, so flag it; the CLI then kills the session's processes,
+	-- ExecuteMultiplayerTestAsync returns, and the retry logic takes over.
+	local budget = SESSION_OVERHEAD
+	for _, t in session.tests do
+		budget += t.timeout
+	end
+	local finished = false
+	task.delay(budget, function()
+		if not finished then
+			if progress then
+				progress(`{position} {Report.sessionLabel(session)} is stuck (no result after {budget}s)`)
+			end
+			if onHung then
+				onHung(`{position} {Report.sessionLabel(session)}`)
+			end
+		end
 	end)
-
-	local result: { [string]: any }
+	local callOk, raw = pcall(function()
+		return StudioTestService:ExecuteMultiplayerTestAsync(session.players, args)
+	end)
+	finished = true
+	if onHung then
+		onHung(nil)
+	end
 	if not callOk then
-		result = { spec = decl.name, status = "error", error = `session failed to start: {raw}`, tests = {} }
-	elseif type(raw) ~= "string" then
-		result = {
-			spec = decl.name,
+		return { status = "error", error = `session failed to start: {raw}`, tests = {} }
+	end
+	if type(raw) ~= "string" then
+		return {
 			status = "error",
-			error = `session ended without a report (got {typeof(raw)}); the test may have been stopped manually`,
+			error = `session ended without a report (got {typeof(raw)}); it may have been stopped manually`,
 			tests = {},
 		}
-	else
-		local decodeOk, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
-		result = if decodeOk then decoded else { spec = decl.name, status = "error", error = "bad report JSON", tests = {} }
 	end
-	result.players = decl.players
-	result.sessionSeconds = math.floor((now() - started) * 100) / 100
-	return result
+	local decodeOk, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+	if not decodeOk or type(decoded) ~= "table" then
+		return { status = "error", error = "the session returned an unreadable report", tests = {} }
+	end
+	return decoded
 end
 
-function Launcher.run(opts: { filter: string? }?): { [string]: any }
+function Launcher.plan(opts: RunOptions?): { [string]: any }
+	local _, decls, loadErrors = loadSpecs(opts and opts.filter)
+	local planned = Plan.build(decls, { grep = opts and opts.grep })
+	local sessions = {}
+	for _, s in planned.sessions do
+		local names = {}
+		for _, t in s.tests do
+			table.insert(names, t.name)
+		end
+		table.insert(sessions, { spec = s.spec, players = s.players, device = s.device, tests = names })
+	end
+	return { sessions = sessions, skippedTests = planned.skipped, loadErrors = loadErrors }
+end
+
+function Launcher.run(opts: RunOptions?): { [string]: any }
 	if running then
 		error("a Rehearse run is already in progress", 0)
 	end
 	running = true
 	local filter = opts and opts.filter
+	local retries = math.clamp((opts and opts.retries) or 1, 0, 5)
 	local runId = HttpService:GenerateGUID(false)
-	local started = now()
-	local report = { runId = runId, specs = {}, passed = 0, failed = 0, errors = 0 }
+	local started = os.clock()
+	local report: { [string]: any } = { runId = runId, version = Launcher.VERSION, sessions = {}, skippedTests = {} }
 
 	local ok, err = pcall(function()
-		local modules = Spec.modules(filter)
-		if #modules == 0 then
+		local modules, decls, loadErrors = loadSpecs(filter)
+		for _, le in loadErrors do
+			table.insert(report.sessions, {
+				spec = le.spec,
+				status = "error",
+				error = le.error,
+				attempts = 0,
+				tests = { { name = "(load spec)", status = "error" } },
+			})
+		end
+		if #modules == 0 and #loadErrors == 0 then
 			error("no specs found in ServerStorage.RehearseSpecs" .. (if filter then ` matching "{filter}"` else ""), 0)
 		end
-		for _, m in modules do
-			local r = runSpec(m, runId)
-			table.insert(report.specs, r)
-			if r.status == "error" then
-				report.errors += 1
-			end
-			for _, t in r.tests or {} do
-				if t.status == "pass" then
-					report.passed += 1
-				else
-					report.failed += 1
+		local planned = Plan.build(decls, { grep = opts and opts.grep })
+		if progress then
+			progress(`{#planned.sessions} session(s) planned from {#modules} spec(s)`)
+		end
+		report.skippedTests = planned.skipped
+
+		for i, session in planned.sessions do
+			local sessionStarted = os.clock()
+			local result: { [string]: any }
+			local attempts = 0
+			local retried = {}
+			while true do
+				attempts += 1
+				local attemptStarted = os.clock()
+				result = runSession(modules[session.specIndex], session, runId, `{i}/{#planned.sessions}`)
+				-- Only retry sessions that never got to run tests (join timeouts, launch failures).
+				if result.status ~= "error" or attempts > retries then
+					break
 				end
+				table.insert(retried, `attempt {attempts} ({round(os.clock() - attemptStarted, 1)}s): {result.error}`)
+				task.wait(1) -- let the previous session's processes shut down
 			end
+
+			result.retried = if #retried > 0 then retried else nil
+			result.spec = session.spec
+			result.players = session.players
+			result.device = session.device
+			result.attempts = attempts
+			result.sessionSeconds = round(os.clock() - sessionStarted, 2)
+			if result.status == "error" then
+				-- Every planned test in a failed session is reported as an error, so nothing silently disappears.
+				local tests = {}
+				for _, t in session.tests do
+					table.insert(tests, { name = t.name, status = "error" })
+				end
+				result.tests = tests
+			end
+			table.insert(report.sessions, result)
 		end
 	end)
 	running = false
 	if not ok then
-		report.errors += 1
 		report.error = tostring(err)
 	end
-	report.ok = report.failed == 0 and report.errors == 0
-	report.seconds = math.floor((now() - started) * 100) / 100
+	report.seconds = round(os.clock() - started, 2)
+	Report.tally(report)
 	return report
 end
 
-local function printReport(report: { [string]: any })
-	local lines = { `Rehearse {if report.ok then "PASSED" else "FAILED"}: {report.passed} passed, {report.failed} failed, {report.errors} errors ({report.seconds}s)` }
-	if report.error then
-		table.insert(lines, `  error: {report.error}`)
-	end
-	for _, s in report.specs do
-		table.insert(lines, `  {s.spec} [{s.players or "?"}p, {s.sessionSeconds or "?"}s]{if s.error then " ERROR: " .. s.error else ""}`)
-		for _, t in s.tests or {} do
-			table.insert(lines, `    {if t.status == "pass" then "✓" else "✗"} {t.name} ({t.ms}ms){if t.error then "\n        " .. t.error else ""}`)
-		end
-	end
-	print(table.concat(lines, "\n"))
-end
-
 function Launcher.start(plugin: Plugin)
-	local bridge = ServerStorage:FindFirstChild("RehearseBridge")
-	if bridge then
-		bridge:Destroy()
+	local existing = ServerStorage:FindFirstChild("RehearseBridge")
+	if existing then
+		existing:Destroy()
 	end
 	local folder = Instance.new("Folder")
 	folder.Name = "RehearseBridge"
 	folder.Archivable = false
-	local runFn = Instance.new("BindableFunction")
-	runFn.Name = "Run"
-	runFn.Parent = folder
-	local startFn = Instance.new("BindableFunction")
-	startFn.Name = "Start"
-	startFn.Parent = folder
 	folder:SetAttribute("Status", "idle")
+	folder:SetAttribute("Version", Launcher.VERSION)
 
-	local function execute(opts)
+	local function fn(name: string): BindableFunction
+		local f = Instance.new("BindableFunction")
+		f.Name = name
+		f.Parent = folder
+		return f
+	end
+
+	onHung = function(label: string?)
+		folder:SetAttribute("Hung", label)
+	end
+	progress = function(text: string)
+		folder:SetAttribute("Progress", text)
+		print(`[Rehearse] {text}`)
+	end
+
+	local button: PluginToolbarButton? = nil
+
+	local function execute(opts: RunOptions?)
 		folder:SetAttribute("Status", "running")
-		local report = Launcher.run(opts)
+		folder:SetAttribute("Progress", "starting")
+		if button then
+			button.Enabled = false
+		end
+		local okRun, report = pcall(Launcher.run, opts)
+		if not okRun then
+			report = { ok = false, error = tostring(report), sessions = {}, skippedTests = {} }
+			Report.tally(report)
+		end
 		folder:SetAttribute("LastReport", HttpService:JSONEncode(report))
+		folder:SetAttribute("Progress", nil)
 		folder:SetAttribute("Status", "done")
-		printReport(report)
+		if button then
+			button.Enabled = true
+		end
+		local text = Report.text(report)
+		if report.ok then
+			print(text)
+		else
+			warn(text)
+		end
 		return report
 	end
-	runFn.OnInvoke = execute
-	startFn.OnInvoke = function(opts)
+
+	fn("Run").OnInvoke = execute
+	fn("Start").OnInvoke = function(opts: RunOptions?)
 		if running then
 			error("a Rehearse run is already in progress", 0)
 		end
 		task.spawn(execute, opts)
 		return "started"
 	end
+	fn("List").OnInvoke = function(opts: RunOptions?)
+		return Launcher.plan(opts)
+	end
 	folder.Parent = ServerStorage
 
 	local toolbar = plugin:CreateToolbar("Rehearse")
-	local button = toolbar:CreateButton("RehearseRunAll", "Run all Rehearse specs", "rbxasset://textures/StudioToolbox/AssetPreview/play.png", "Run tests")
-	button.ClickableWhenViewportHidden = true
-	button.Click:Connect(function()
+	local b = toolbar:CreateButton(
+		"RehearseRunAll",
+		"Run every spec in ServerStorage.RehearseSpecs",
+		"", -- text-only button
+		"Run tests"
+	)
+	b.ClickableWhenViewportHidden = true
+	b.Click:Connect(function()
 		if not running then
 			task.spawn(execute, nil)
 		end
 	end)
+	button = b
 
 	plugin.Unloading:Connect(function()
+		progress = nil
+		onHung = nil
 		folder:Destroy()
 	end)
 end
