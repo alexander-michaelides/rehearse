@@ -116,8 +116,14 @@ Device ids come from `StudioDeviceSimulatorService:GetDeviceListAsync()`, for ex
   lune run cli/rehearse run build/Game.rbxlx --junit results.xml
   lune run cli/rehearse list build/Game.rbxlx --grep "lobby"      # what would run
   ```
-  Options: `--filter`, `--grep`, `--fail-on-errors`, `--json`, `--junit`, `--report`, `--retries`, `--timeout`, `--stall`, `--studio`, `--keep-open`, `--quiet`. Exit codes: `0` passed, `1` failed, `2` couldn't run.
+  Options: `--filter`, `--grep`, `--fail-on-errors`, `--solo`, `--json`, `--junit`, `--report`, `--retries`, `--timeout`, `--stall`, `--studio`, `--keep-open`, `--quiet`. Exit codes: `0` passed, `1` failed, `2` couldn't run.
 - **AI agents (Studio MCP):** see [AGENTS.md](AGENTS.md).
+
+### Solo mode
+`--solo` (or `{ solo = true }` through the bridge) runs 1-player sessions as an ordinary Play test inside the Studio window, instead of a separate server and client. It's faster, and the Studio MCP can screenshot or record the client (`video_capture`). Notes:
+- The player is your signed-in Studio account, so your name and avatar appear in the game and in reports.
+- Studio throttles rendering when its window is in the background, so keep the window visible if you're recording.
+- Multi-player specs always use separate processes.
 
 ## How it works
 Studio loads plugins into every DataModel of a test session, so one plugin plays three roles:

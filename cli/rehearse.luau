@@ -35,6 +35,7 @@ Options:
   --grep <text>       Only tests whose "Spec > test" name contains <text> (case-insensitive)
   --retries <n>       Extra attempts for sessions that fail to start (default 1)
   --fail-on-errors    Fail a test if any game script logs an error during it
+  --solo              Run 1-player sessions as an in-process Play test (faster)
   --json              Print the JSON report to stdout instead of text
   --junit <file>      Also write a JUnit XML report
   --report <file>     Also write the JSON report
@@ -61,8 +62,15 @@ end
 
 -- Argument parsing --------------------------------------------------------------------
 
-local FLAGS =
-	{ json = true, ["keep-open"] = true, quiet = true, version = true, help = true, ["fail-on-errors"] = true }
+local FLAGS = {
+	json = true,
+	["keep-open"] = true,
+	quiet = true,
+	version = true,
+	help = true,
+	["fail-on-errors"] = true,
+	solo = true,
+}
 local VALUES = {
 	filter = true,
 	grep = true,
@@ -432,6 +440,7 @@ local runOpts = {
 	grep = opts.grep,
 	retries = if opts.retries then tonumber(opts.retries) else nil,
 	failOnErrors = opts["fail-on-errors"] == true,
+	solo = opts.solo == true,
 }
 fs.writeFile(scriptPath, runScript(token, command, runOpts))
 

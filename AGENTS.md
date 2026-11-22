@@ -38,6 +38,7 @@ end
 - To walk, use `moveTo`. Held keys don't register in the unfocused test-client windows.
 - Use `s.failOnErrors()` (or `--fail-on-errors`) when the change shouldn't introduce script errors. `t.gameErrors()` returns them mid-test.
 - Always read each session's `startupErrors` first. A script that crashed at load (for example a DataStore call in an unpublished place) causes many later failures.
+- For 1-player specs, `{ solo = true }` is faster and lets you `video_capture` the client (datamodel "Client") while the run is active. Stop recording before the session ends.
 - Don't put `WaitForChild` or `wait()` inside `t.waitFor` predicates. Use `FindFirstChild` and let `waitFor` poll.
 - CLI exit code 2 with "Studio didn't start": a Studio dialog (often after a crash) is blocking launches. Ask the user to dismiss it; you can't.
 - UI across screens: `s.devices({ "iphone_7", "ipad_a16" })` and assert `client:isInViewport(path)`.

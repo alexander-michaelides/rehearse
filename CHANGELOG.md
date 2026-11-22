@@ -13,6 +13,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - Example game: a coin pickup, a ProximityPrompt shop selling a Sword, a mouse-reading Paintbrush tool, a deliberate script error, and a Shop spec covering them.
 
 - `startupErrors`/`startupWarnings` on each session: errors logged while the session started and players joined, seeded from `LogService:GetLogHistory()` on the server and clients. Before this, a script that crashed at startup only showed its downstream errors.
+- Solo mode (`--solo`, bridge option `solo = true`): 1-player sessions run as an in-process Play test (`ExecutePlayModeAsync`) in the same Studio window. That's faster (Shop session: 9.6s instead of 14.3s), and the Studio MCP can screenshot or record the client. The player is the signed-in Studio user, not "Player1". A simulated device is restored afterwards.
 - `s.beforeJoin(fn)`: runs on the server before any client joins, for setup or tracing. Its `t.log` lines go to the session's `setupLogs`.
 
 ### Changed

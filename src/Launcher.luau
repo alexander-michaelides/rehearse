@@ -33,6 +33,7 @@ export type RunOptions = {
 	grep: string?, -- substring of "Spec > test name" (case-insensitive)
 	retries: number?, -- extra attempts for a session that fails before its tests run (default 1)
 	failOnErrors: boolean?, -- fail tests when game scripts log errors (also per spec: s.failOnErrors())
+	solo: boolean?, -- run 1-player sessions as an in-process Play test (faster; the Studio MCP can record it)
 }
 
 Launcher.VERSION = "0.2.0"
@@ -108,9 +109,28 @@ local function runSession(
 			end
 		end
 	end)
+	local solo = opts ~= nil and opts.solo == true and session.players == 1
+	args.solo = solo
+	local simulator = game:GetService("StudioDeviceSimulatorService") :: any
+	local deviceBefore = nil
+	if solo and session.device then
+		pcall(function()
+			deviceBefore = simulator:GetDeviceAsync()
+		end)
+	end
 	local callOk, raw = pcall(function()
+		if solo then
+			-- Server and client run inside this Studio window, as with the Play button.
+			return StudioTestService:ExecutePlayModeAsync(args)
+		end
 		return StudioTestService:ExecuteMultiplayerTestAsync(session.players, args)
 	end)
+	if deviceBefore then
+		-- A solo session simulates the device in this window; put it back.
+		pcall(function()
+			simulator:SetDeviceAsync(deviceBefore)
+		end)
+	end
 	finished = true
 	if onHung then
 		onHung(nil)
