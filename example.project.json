@@ -5,23 +5,68 @@
     "Workspace": {
       "Baseplate": {
         "$className": "Part",
-        "$properties": { "Anchored": true, "Size": [256, 4, 256], "Position": [0, -2, 0] }
+        "$properties": {
+          "Anchored": true,
+          "Size": [
+            256,
+            4,
+            256
+          ],
+          "Position": [
+            0,
+            -2,
+            0
+          ]
+        }
       },
       "SpawnLocation": {
         "$className": "SpawnLocation",
-        "$properties": { "Anchored": true, "Size": [12, 1, 12], "Position": [0, 0.5, 0] }
+        "$properties": {
+          "Anchored": true,
+          "Size": [
+            12,
+            1,
+            12
+          ],
+          "Position": [
+            0,
+            0.5,
+            0
+          ]
+        }
       }
     },
     "ServerScriptService": {
-      "Lobby": { "$path": "example/server/Lobby.server.luau" }
+      "Lobby": {
+        "$path": "example/server/Lobby.server.luau"
+      },
+      "World": {
+        "$path": "example/server/World.server.luau"
+      }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "Menu": { "$path": "example/client/Menu.client.luau" }
+        "Menu": {
+          "$path": "example/client/Menu.client.luau"
+        }
       }
     },
     "ServerStorage": {
-      "RehearseSpecs": { "$path": "example/specs" }
+      "RehearseSpecs": {
+        "$path": "example/specs"
+      }
+    },
+    "StarterPack": {
+      "$className": "StarterPack",
+      "Paintbrush": {
+        "$className": "Tool",
+        "$properties": {
+          "RequiresHandle": false
+        },
+        "Paint": {
+          "$path": "example/client/Paint.client.luau"
+        }
+      }
     }
   }
 }
