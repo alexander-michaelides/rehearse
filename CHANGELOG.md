@@ -14,6 +14,7 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 - `startupErrors`/`startupWarnings` on each session: errors logged while the session started and players joined, seeded from `LogService:GetLogHistory()` on the server and clients. Before this, a script that crashed at startup only showed its downstream errors.
 - Solo mode (`--solo`, bridge option `solo = true`): 1-player sessions run as an in-process Play test (`ExecutePlayModeAsync`) in the same Studio window. That's faster (Shop session: 9.6s instead of 14.3s), and the Studio MCP can screenshot or record the client. The player is the signed-in Studio user, not "Player1". A simulated device is restored afterwards.
+- `t.expect(value, label)`: an optional label that names the value in failure messages ("MatchStarted: expected: true to be false").
 - `s.beforeJoin(fn)`: runs on the server before any client joins, for setup or tracing. Its `t.log` lines go to the session's `setupLogs`.
 
 ### Changed

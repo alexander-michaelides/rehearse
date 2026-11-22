@@ -28,11 +28,12 @@ local function deepEqual(a: any, b: any): boolean
 	return true
 end
 
-local function build(actual: any, negate: boolean)
+local function build(actual: any, negate: boolean, label: string?)
 	local m = {}
 	local function check(pass: boolean, msg: string)
 		if pass == negate then
-			error((if negate then "expected NOT: " else "expected: ") .. msg, 3)
+			local prefix = if label then label .. ": " else ""
+			error(prefix .. (if negate then "expected NOT: " else "expected: ") .. msg, 3)
 		end
 	end
 	function m.toBe(expected: any)
@@ -65,8 +66,10 @@ local function build(actual: any, negate: boolean)
 	return m
 end
 
-return function(actual: any)
-	local m = build(actual, false)
-	m.never = build(actual, true)
+-- expect(actual, label?): the optional label names the value in failure messages,
+-- e.g. expect(workspace:GetAttribute("MatchStarted"), "MatchStarted").toBe(false).
+return function(actual: any, label: string?)
+	local m = build(actual, false, label)
+	m.never = build(actual, true, label)
 	return m
 end

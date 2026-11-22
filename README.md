@@ -72,7 +72,7 @@ In a test (`t`):
 | `t.client(i)` | The *i*-th client in join order. `.player` is its `Player` on the server |
 | `t.clients()`, `t.players()` | All client proxies / `Player`s |
 | `t.waitFor(fn, timeout?, description?)` | Polls a server-side predicate (default 5s) |
-| `t.expect(v).toBe / toEqual / toBeTruthy / toBeFalsy / toBeNear / toContain`, `.never.*` | Assertions |
+| `t.expect(v, label?).toBe / toEqual / toBeTruthy / toBeFalsy / toBeNear / toContain`, `.never.*` | Assertions |
 | `t.addPlayers(n)` | Adds players mid-session and returns their client proxies (experimental; see limitations) |
 | `t.device` | The simulated device for this session (`{ id, orientation? }`) or nil |
 | `t.gameErrors()` | Script errors logged so far in this test, from the server and every client |
