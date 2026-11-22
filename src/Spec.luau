@@ -36,6 +36,8 @@ export type SpecDecl = {
 	beforeEach: { TestFn },
 	afterEach: { TestFn },
 	clientFns: { [string]: (...any) -> ...any },
+	failOnErrors: boolean,
+	ignoreErrors: { string },
 	tests: { TestDecl },
 }
 
@@ -78,6 +80,8 @@ function Spec.declare(name: string, specFn: any): SpecDecl
 		beforeEach = {},
 		afterEach = {},
 		clientFns = {},
+		failOnErrors = false,
+		ignoreErrors = {},
 		tests = {},
 	}
 	local api = {}
@@ -107,6 +111,20 @@ function Spec.declare(name: string, specFn: any): SpecDecl
 
 	function api.device(d: any)
 		api.devices({ d })
+	end
+
+	-- Fail a test when any game script logs an error during it (server or client).
+	function api.failOnErrors()
+		decl.failOnErrors = true
+	end
+
+	-- Lua patterns for logged errors/warnings that aren't the game's fault.
+	function api.ignoreErrors(patterns: { string })
+		assert(type(patterns) == "table", "ignoreErrors needs a list of Lua patterns")
+		for _, pattern in patterns do
+			assert(type(pattern) == "string", "ignoreErrors patterns must be strings")
+			table.insert(decl.ignoreErrors, pattern)
+		end
 	end
 
 	function api.beforeEach(fn: TestFn)

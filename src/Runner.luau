@@ -68,11 +68,24 @@ local function makeChannel(args: { [string]: any }, specModule: ModuleScript): (
 	return fn, ready
 end
 
+local function fmtValue(v: any, depth: number): string
+	if type(v) == "string" then
+		return string.format("%q", v)
+	elseif type(v) == "table" and depth < 2 then
+		local parts = {}
+		for k, inner in v do
+			table.insert(parts, `{k} = {fmtValue(inner, depth + 1)}`)
+		end
+		table.sort(parts)
+		return "{ " .. table.concat(parts, ", ") .. " }"
+	end
+	return tostring(v)
+end
+
 local function fmtArgs(...: any): string
 	local parts = {}
 	for i = 1, select("#", ...) do
-		local v = select(i, ...)
-		parts[i] = if type(v) == "string" then string.format("%q", v) else tostring(v)
+		parts[i] = fmtValue((select(i, ...)), 0)
 	end
 	return table.concat(parts, ", ")
 end
@@ -206,45 +219,11 @@ local function run(args: { [string]: any }): { [string]: any }
 			end
 			return res.value
 		end
-		local proxy = {
+		-- Any method not defined here is sent to the client agent as a command:
+		-- client:click(path) -> Agent commands.click(path), and so on.
+		local proxy = setmetatable({
 			index = i,
 			player = player,
-			click = function(_, path: string, opts: any?)
-				return call("click", path, opts)
-			end,
-			key = function(_, keyCode: string, opts: any?)
-				return call("key", keyCode, opts)
-			end,
-			type = function(_, text: string)
-				return call("type", text)
-			end,
-			fill = function(_, path: string, text: string, opts: any?)
-				return call("fill", path, text, opts)
-			end,
-			get = function(_, path: string)
-				return call("get", path)
-			end,
-			exists = function(_, path: string)
-				return call("exists", path)
-			end,
-			isVisible = function(_, path: string)
-				return call("isVisible", path)
-			end,
-			isInViewport = function(_, path: string)
-				return call("isInViewport", path)
-			end,
-			waitFor = function(_, path: string, expected: any?, timeout: number?)
-				return call("waitFor", path, expected, timeout)
-			end,
-			character = function(_, timeout: number?)
-				return call("character", timeout)
-			end,
-			moveTo = function(_, target: Vector3, timeout: number?)
-				return call("moveTo", target, timeout)
-			end,
-			call = function(_, fnName: string, ...: any)
-				return call("call", fnName, ...)
-			end,
 			leave = function(_, timeout: number?)
 				call("leave")
 				waitFor(function()
@@ -252,7 +231,13 @@ local function run(args: { [string]: any }): { [string]: any }
 				end, timeout or 10, `client({i}) to leave`)
 				left[player] = true
 			end,
-		}
+		}, {
+			__index = function(_, cmd: string)
+				return function(_, ...: any)
+					return call(cmd, ...)
+				end
+			end,
+		})
 		proxies[i] = proxy
 		return proxy
 	end
@@ -266,12 +251,119 @@ local function run(args: { [string]: any }): { [string]: any }
 		wanted = w
 	end
 
+	-- Game script errors and warnings, from the server and every client, per test.
+	local serverLog: { { kind: string, message: string } } = {}
+	game:GetService("LogService").MessageOut:Connect(function(message, messageType)
+		if string.sub(message, 1, 10) == "[Rehearse]" then
+			return
+		end
+		if messageType == Enum.MessageType.MessageError or messageType == Enum.MessageType.MessageWarning then
+			if #serverLog < 500 then
+				table.insert(serverLog, {
+					kind = if messageType == Enum.MessageType.MessageError then "error" else "warning",
+					message = string.sub(message, 1, 500),
+				})
+			end
+		end
+	end)
+
+	-- InvokeClient never times out on its own; diagnostics must not hang a session.
+	local function invokeWithin(player: Player, seconds: number, cmd: string, ...: any): any
+		local result, finished = nil, false
+		local packed = table.pack(...)
+		local thread = task.spawn(function()
+			local okInvoke, res = pcall(command.InvokeClient, command, player, cmd, table.unpack(packed, 1, packed.n))
+			if okInvoke and type(res) == "table" and res.ok then
+				result = res.value
+			end
+			finished = true
+		end)
+		local deadline = os.clock() + seconds
+		while not finished and os.clock() < deadline do
+			RunService.Heartbeat:Wait()
+		end
+		if not finished then
+			task.cancel(thread)
+		end
+		return result
+	end
+
+	local function drainClientLogs(into: { { kind: string, message: string } })
+		for i, p in ordered do
+			if not left[p] and p.Parent ~= nil then
+				local entries = invokeWithin(p, 2, "drainLogs")
+				for _, e in entries or {} do
+					table.insert(into, { kind = e.kind, message = `client({i}): {e.message}` })
+				end
+			end
+		end
+	end
+
+	local function snapshots(): { [string]: any }?
+		local out = {}
+		local any = false
+		for i, p in ordered do
+			if not left[p] and p.Parent ~= nil then
+				local snap = invokeWithin(p, 3, "snapshot")
+				if snap then
+					out[`client({i})`] = snap
+					any = true
+				end
+			end
+		end
+		return if any then out else nil
+	end
+
+	local failOnErrors = decl.failOnErrors or args.failOnErrors == true
+
+	-- Studio noise that isn't the game's fault (other plugins, asset loading in a local place).
+	local ignorePatterns = {
+		"^Unable to load plugin icon",
+		"^ContentId: .* failed due to",
+		"^Failed to load sound",
+		"^Asset type does not match",
+	}
+	for _, pattern in decl.ignoreErrors do
+		table.insert(ignorePatterns, pattern)
+	end
+	local function ignored(message: string): boolean
+		local text = string.gsub(message, "^client%(%d+%): ", "")
+		text = string.gsub(text, "^server: ", "")
+		for _, pattern in ignorePatterns do
+			if string.find(text, pattern) then
+				return true
+			end
+		end
+		return false
+	end
+
 	local results = {}
 	for index, test in decl.tests do
 		if wanted and not wanted[index] then
 			continue
 		end
 		local logs = {}
+		-- Start this test's log window: drop anything logged before it.
+		local serverMark = #serverLog
+		drainClientLogs({})
+		local testLog: { { kind: string, message: string } } = {}
+		local function collectLogs()
+			for i = serverMark + 1, #serverLog do
+				local e = serverLog[i]
+				table.insert(testLog, { kind = e.kind, message = `server: {e.message}` })
+			end
+			serverMark = #serverLog
+			drainClientLogs(testLog)
+		end
+		local function errorsOnly(): { string }
+			local out = {}
+			for _, e in testLog do
+				if e.kind == "error" and not ignored(e.message) then
+					table.insert(out, e.message)
+				end
+			end
+			return out
+		end
 		local ctx = {
 			client = clientProxy,
 			clients = function()
@@ -297,6 +389,11 @@ local function run(args: { [string]: any }): { [string]: any }
 				return table.unpack(out)
 			end,
 			device = args.device,
+			-- Game script errors logged so far in this test (server and clients).
+			gameErrors = function(): { string }
+				collectLogs()
+				return errorsOnly()
+			end,
 			waitFor = waitFor,
 			wait = function(seconds: number)
 				task.wait(seconds)
@@ -346,12 +443,30 @@ local function run(args: { [string]: any }): { [string]: any }
 			task.cancel(thread)
 			ok, err = false, `test timed out after {test.timeout}s`
 		end
+		local ms = math.floor((os.clock() - started) * 1000)
+
+		task.wait(0.1) -- let errors from the test's last actions reach the log
+		collectLogs()
+		local gameErrors, gameWarnings = {}, {}
+		for _, e in testLog do
+			local list = if e.kind == "error" then gameErrors else gameWarnings
+			if #list < 20 and not ignored(e.message) then
+				table.insert(list, e.message)
+			end
+		end
+		if ok and failOnErrors and #gameErrors > 0 then
+			ok, err = false, `{#gameErrors} game script error(s) during the test (failOnErrors): {gameErrors[1]}`
+		end
+
 		table.insert(results, {
 			name = test.name,
 			status = if ok then "pass" else "fail",
 			error = if ok then nil else err,
-			ms = math.floor((os.clock() - started) * 1000),
+			ms = ms,
 			logs = if #logs > 0 then logs else nil,
+			gameErrors = if #gameErrors > 0 then gameErrors else nil,
+			gameWarnings = if #gameWarnings > 0 then gameWarnings else nil,
+			snapshot = if ok then nil else snapshots(),
 		})
 	end
 

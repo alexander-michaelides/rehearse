@@ -54,9 +54,16 @@ function Report.text(report: any): string
 				table.insert(lines, `    {ICON.error} {t.name} (not run)`)
 				continue
 			end
-			table.insert(lines, `    {ICON[t.status] or "?"} {t.name} ({t.ms or 0}ms)`)
+			local errCount = if t.gameErrors then #t.gameErrors else 0
+			local suffix = if errCount > 0 and t.status == "pass" then `, {errCount} game error(s)` else ""
+			table.insert(lines, `    {ICON[t.status] or "?"} {t.name} ({t.ms or 0}ms{suffix})`)
 			if t.error then
 				table.insert(lines, `        {t.error}`)
+			end
+			if t.status ~= "pass" and t.gameErrors then
+				for _, e in t.gameErrors do
+					table.insert(lines, `        script error: {e}`)
+				end
 			end
 			if t.status ~= "pass" and t.logs then
 				for _, l in t.logs do
@@ -118,6 +125,9 @@ function Report.junit(report: any): string
 				table.insert(out, `      <{tag} message="{xmlEscape(message)}">{xmlEscape(message)}</{tag}>`)
 				if t.logs then
 					table.insert(out, `      <system-out>{xmlEscape(table.concat(t.logs, "\n"))}</system-out>`)
+				end
+				if t.gameErrors then
+					table.insert(out, `      <system-err>{xmlEscape(table.concat(t.gameErrors, "\n"))}</system-err>`)
 				end
 				table.insert(out, `    </testcase>`)
 			end

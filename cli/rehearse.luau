@@ -23,7 +23,7 @@ local DateTime = require("@lune/datetime")
 
 local Report = require("../src/Report")
 
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 
 local USAGE = [[
 Usage:
@@ -34,6 +34,7 @@ Options:
   --filter <text>     Only specs whose module name contains <text>
   --grep <text>       Only tests whose "Spec > test" name contains <text> (case-insensitive)
   --retries <n>       Extra attempts for sessions that fail to start (default 1)
+  --fail-on-errors    Fail a test if any game script logs an error during it
   --json              Print the JSON report to stdout instead of text
   --junit <file>      Also write a JUnit XML report
   --report <file>     Also write the JSON report
@@ -60,7 +61,8 @@ end
 
 -- Argument parsing --------------------------------------------------------------------
 
-local FLAGS = { json = true, ["keep-open"] = true, quiet = true, version = true, help = true }
+local FLAGS =
+	{ json = true, ["keep-open"] = true, quiet = true, version = true, help = true, ["fail-on-errors"] = true }
 local VALUES = {
 	filter = true,
 	grep = true,
@@ -412,6 +414,7 @@ local runOpts = {
 	filter = opts.filter,
 	grep = opts.grep,
 	retries = if opts.retries then tonumber(opts.retries) else nil,
+	failOnErrors = opts["fail-on-errors"] == true,
 }
 fs.writeFile(scriptPath, runScript(token, command, runOpts))
 

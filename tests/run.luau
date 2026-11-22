@@ -75,6 +75,31 @@ test("declare validates input", function()
 	end, "must return a function")
 end)
 
+test("declare collects error options", function()
+	local d = Spec.declare("X", function(s)
+		s.failOnErrors()
+		s.ignoreErrors({ "^Known noise", "Deprecated" })
+		s.test("t", noop)
+	end)
+	check(d.failOnErrors)
+	check(#d.ignoreErrors == 2 and d.ignoreErrors[1] == "^Known noise")
+	throws(function()
+		Spec.declare("X", function(s)
+			s.ignoreErrors({ 42 })
+		end)
+	end, "patterns must be strings")
+end)
+
+test("plan carries test timeouts for the session watchdog", function()
+	local p = Plan.build({
+		Spec.declare("A", function(s)
+			s.test("slow", { timeout = 90 }, noop)
+			s.test("fast", noop)
+		end),
+	})
+	check(p.sessions[1].tests[1].timeout == 90 and p.sessions[1].tests[2].timeout == Spec.DEFAULT_TIMEOUT)
+end)
+
 test("declare collects hooks, devices and client functions", function()
 	local d = Spec.declare("X", function(s)
 		s.isolated()
@@ -199,6 +224,16 @@ test("tally counts statuses", function()
 	local r = sample()
 	check(r.passed == 1 and r.failed == 1 and r.errors == 1 and r.skipped == 1)
 	check(r.ok == false)
+end)
+
+test("reports include game script errors", function()
+	local r = sample()
+	r.sessions[1].tests[2].gameErrors = { "client(1): boom" }
+	r.sessions[1].tests[1].gameErrors = { "server: noisy" }
+	local text = Report.text(r)
+	check(string.find(text, "script error: client(1): boom", 1, true), text)
+	check(string.find(text, "ok (10ms, 1 game error(s))", 1, true), text)
+	check(string.find(Report.junit(r), "<system-err>client(1): boom</system-err>", 1, true))
 end)
 
 test("text report shows failures and session errors", function()
