@@ -60,6 +60,7 @@ Declarations (`s`):
 | `s.isolated()` | Every test in this spec gets its own fresh session |
 | `s.devices({ "iphone_7", { id = "ipad_a16", orientation = "Portrait" } })` | Run the spec once per simulated device |
 | `s.beforeEach(fn)`, `s.afterEach(fn)` | Hooks around every test (`afterEach` runs even when the test fails) |
+| `s.beforeJoin(fn)` | Runs on the server before any client joins (setup, or tracing PlayerAdded/CharacterAdded). `t.log` goes to the session's `setupLogs` |
 | `s.client(name, fn)` | A function that runs **on the client**, called with `client:call(name, ...)` |
 | `s.failOnErrors()` | Fail a test if any game script logs an error during it (or `--fail-on-errors` for a whole run) |
 | `s.ignoreErrors({ "pattern", ... })` | Lua patterns for errors and warnings that aren't the game's fault |
@@ -100,6 +101,7 @@ Any other method name is sent to the client agent as a command, so `c:somethingN
 ### What a failing test reports
 Each test result also carries:
 - `gameErrors` and `gameWarnings`: anything game scripts logged during the test on the server or any client, prefixed `server:` or `client(i):`. Known Studio noise (other plugins' icons, asset loading) is ignored.
+- On the session: `startupErrors` and `startupWarnings`, for anything logged while the session started and players joined. A script that crashes at load shows up here, not as a pile of downstream errors.
 - `snapshot`, on failure only: for each client, the visible UI elements with their paths and text, the character position and health, the equipped tool and the focused TextBox. An agent can see why `click("PlayerGui.Shop.Buy")` failed (for example, the shop never opened) without a screenshot.
 
 Client paths are relative to `LocalPlayer` (`"PlayerGui.Menu.Play"`) unless they start with `game.` (`"game.Workspace.CurrentCamera.ViewportSize"`). The last segment can be a property or `@Attribute`.
@@ -139,6 +141,7 @@ The plugin asks for none: no HTTP and no script injection. The CLI runs Studio w
 - `t.addPlayers` uses `StudioTestService:AddPlayers`. It usually works in the example spec, but once in testing the session froze, consistent with the reported crash bug ([DevForum](https://devforum.roblox.com/t/4691976)). The watchdog recovered it. Give those tests `isolated = true`.
 - Test clients run in unfocused windows, and holding a key there doesn't register. `c:prompt` falls back to `ProximityPrompt:InputHoldBegin`, but `c:key(k, { hold })` for movement may not work. Use `c:moveTo` for walking.
 - VirtualInput has no touch input, so mobile tests check layout (`s.devices`, `isInViewport`) and drive input with mouse and keys.
+- If Studio crashes (for example in `AddPlayers`), it may show a dialog that blocks new Studio launches until you dismiss it. The CLI reports this within 60s.
 - The CLI is tested on macOS only. On Windows, Studio discovery and log paths are implemented but untested, and the CLI doesn't close Studio afterwards.
 - Studio's test sessions are occasionally flaky. During development, a session's second client sometimes never launched, and once a session never finished. Rehearse works around this in three ways, all recorded in the report:
   - It replaces clients that haven't appeared after 15s (`replacedClients`). This path hasn't been triggered in testing yet.

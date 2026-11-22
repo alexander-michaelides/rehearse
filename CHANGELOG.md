@@ -12,8 +12,20 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - The client proxy passes any method through to the agent, so new commands don't need server-side wiring.
 - Example game: a coin pickup, a ProximityPrompt shop selling a Sword, a mouse-reading Paintbrush tool, a deliberate script error, and a Shop spec covering them.
 
+- `startupErrors`/`startupWarnings` on each session: errors logged while the session started and players joined, seeded from `LogService:GetLogHistory()` on the server and clients. Before this, a script that crashed at startup only showed its downstream errors.
+- `s.beforeJoin(fn)`: runs on the server before any client joins, for setup or tracing. Its `t.log` lines go to the session's `setupLogs`.
+
 ### Changed
 - The session watchdog's slack went from 60s to 45s, so stuck sessions are recovered sooner.
+- The CLI runs each session on a uniquely named temp copy of the place and removes that copy's auto-recovery files afterwards. Recovery files left by force-closed sessions could otherwise make Studio show a blocking "recover?" dialog.
+- The CLI fails within 60s with a clear message when Studio doesn't start (usually a dialog left open after a crash), instead of waiting for `--timeout`.
+- `click` no longer requires `Active = true` (players can press inactive buttons). Its failures now say why: doesn't exist, isn't rendered, or the centre is off screen.
+- `t.waitFor` keeps its timeout even when the predicate yields (for example `WaitForChild` inside it), and says so.
+- Snapshots skip Roblox's own ScreenGuis (Chat, BubbleChat, TouchGui and others).
+- The example `addPlayers` test is skipped by default, because `AddPlayers` can crash Studio's test server.
+
+### Fixed
+- Clicks and `isInViewport` were off by the top-bar inset for `IgnoreGuiInset` ScreenGuis. `AbsolutePosition` is measured below the top bar either way.
 
 ## [0.1.0] - 2026-11-22
 ### Added
