@@ -12,7 +12,10 @@ return function(s)
 		end, 5, "1 player after one left")
 	end)
 
-	s.test("a player can join mid-session", { isolated = true }, function(t)
+	-- Skipped by default: StudioTestService:AddPlayers can crash Studio's test server
+	-- (https://devforum.roblox.com/t/4691976), and after a crash Studio may show a dialog that
+	-- blocks every later launch until someone dismisses it. Run it with s.only to try it.
+	s.skip("a player can join mid-session", { isolated = true }, function(t)
 		local newcomer = t.addPlayers(1)
 		t.expect(newcomer.index).toBe(3)
 		t.expect(newcomer:waitFor("PlayerGui.Menu.Frame.PlayButton.Visible", true)).toBe(true)

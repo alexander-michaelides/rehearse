@@ -23,7 +23,7 @@ local DateTime = require("@lune/datetime")
 
 local Report = require("../src/Report")
 
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 
 local USAGE = [[
 Usage:
@@ -34,6 +34,8 @@ Options:
   --filter <text>     Only specs whose module name contains <text>
   --grep <text>       Only tests whose "Spec > test" name contains <text> (case-insensitive)
   --retries <n>       Extra attempts for sessions that fail to start (default 1)
+  --fail-on-errors    Fail a test if any game script logs an error during it
+  --solo              Run 1-player sessions as an in-process Play test (faster)
   --json              Print the JSON report to stdout instead of text
   --junit <file>      Also write a JUnit XML report
   --report <file>     Also write the JSON report
@@ -60,7 +62,15 @@ end
 
 -- Argument parsing --------------------------------------------------------------------
 
-local FLAGS = { json = true, ["keep-open"] = true, quiet = true, version = true, help = true }
+local FLAGS = {
+	json = true,
+	["keep-open"] = true,
+	quiet = true,
+	version = true,
+	help = true,
+	["fail-on-errors"] = true,
+	solo = true,
+}
 local VALUES = {
 	filter = true,
 	grep = true,
@@ -158,6 +168,14 @@ local function findStudio(explicit: string?): string
 		end
 	end
 	return die("could not find Roblox Studio; pass --studio <path> or set REHEARSE_STUDIO")
+end
+
+-- Where Studio keeps auto-recovery copies of open places, keyed by the place's file name.
+local function autoSaveDir(): string
+	if process.os == "windows" then
+		return join(process.env.LOCALAPPDATA or "", "Roblox", "RobloxStudio", "AutoSaves")
+	end
+	return join(home(), "Library", "Application Support", "Roblox", "RobloxStudio", "AutoSaves")
 end
 
 local function logDir(): string
@@ -408,10 +426,21 @@ end
 local token = string.format("%x%x", math.random(0, 0x7fffffff), DateTime.now().unixTimestampMillis % 0x7fffffff)
 local scriptPath = join(process.env.TMPDIR or process.env.TEMP or "/tmp", `rehearse-{token}.luau`)
 scriptPath = string.gsub(scriptPath, "//", "/")
+
+-- Run on a uniquely named copy of the place. Studio writes auto-recovery files named after
+-- the place file, and Studio processes closed by force leave them behind; reopening a file
+-- with a recovery file shows a "recover?" dialog that blocks Studio and its test servers.
+local placeExt = string.match(place, "%.rbxlx?$") or ".rbxl"
+local runPlaceStem = `rehearse-{token}`
+local runPlace =
+	string.gsub(join(process.env.TMPDIR or process.env.TEMP or "/tmp", runPlaceStem .. placeExt), "//", "/")
+fs.copy(place, runPlace, true)
 local runOpts = {
 	filter = opts.filter,
 	grep = opts.grep,
 	retries = if opts.retries then tonumber(opts.retries) else nil,
+	failOnErrors = opts["fail-on-errors"] == true,
+	solo = opts.solo == true,
 }
 fs.writeFile(scriptPath, runScript(token, command, runOpts))
 
@@ -423,7 +452,8 @@ end
 
 log(`rehearse: opening {placeArg} in Studio...`)
 local launchedAt = DateTime.now().unixTimestampMillis
-local child = process.create(studio, { "-task", "RunScript", "-localPlaceFile", place, "-runScriptFile", scriptPath })
+local child =
+	process.create(studio, { "-task", "RunScript", "-localPlaceFile", runPlace, "-runScriptFile", scriptPath })
 
 -- Studio writes its whole log to stdout/stderr. Keep draining both pipes, or
 -- Studio blocks on a full pipe and its main thread hangs.
@@ -456,6 +486,8 @@ local collector: Collector = { chunks = {}, totals = {}, seenProgress = {}, done
 local logPath: string? = nil
 local deadline = os.clock() + timeout
 local outcome: string? = nil
+local launchStarted = os.clock()
+local launchTimeout = 60
 local lastSign = os.clock() -- last time Studio showed any sign of life (progress or heartbeat)
 local lastProgress: string? = nil
 local lastProgressAt = os.clock()
@@ -500,6 +532,10 @@ while os.clock() < deadline do
 		outcome = "stalled"
 		break
 	end
+	if not logPath and os.clock() - launchStarted > launchTimeout then
+		outcome = "blocked"
+		break
+	end
 	if studioExited then
 		-- Studio exited on its own before reporting (it may have handed off to an existing window).
 		outcome = "exited"
@@ -515,6 +551,18 @@ if not opts["keep-open"] then
 	cleanup(pids)
 end
 pcall(fs.removeFile, scriptPath)
+if not opts["keep-open"] then
+	pcall(fs.removeFile, runPlace)
+	-- Remove only this run's recovery files.
+	pcall(function()
+		local dir = autoSaveDir()
+		for _, name in fs.readDir(dir) do
+			if string.sub(name, 1, #runPlaceStem) == runPlaceStem then
+				fs.removeFile(join(dir, name))
+			end
+		end
+	end)
+end
 
 if collector.done.fatal then
 	die(collector.done.fatal)
@@ -522,6 +570,11 @@ end
 if not outcome then
 	die(
 		`timed out after {timeout}s{if logPath then " (Studio log: " .. logPath .. ")" else " before Studio wrote a log"}`
+	)
+end
+if outcome == "blocked" then
+	die(
+		`Studio didn't start within {launchTimeout}s (no log file). A Studio dialog is probably open and blocking new launches, for example a crash or auto-recovery prompt from an earlier session. Check your Studio windows, dismiss it, and run again.`
 	)
 end
 if outcome == "stalled" then

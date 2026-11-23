@@ -32,16 +32,18 @@ export type RunOptions = {
 	filter: string?, -- substring of the spec module name
 	grep: string?, -- substring of "Spec > test name" (case-insensitive)
 	retries: number?, -- extra attempts for a session that fails before its tests run (default 1)
+	failOnErrors: boolean?, -- fail tests when game scripts log errors (also per spec: s.failOnErrors())
+	solo: boolean?, -- run 1-player sessions as an in-process Play test (faster; the Studio MCP can record it)
 }
 
-Launcher.VERSION = "0.1.0"
+Launcher.VERSION = "0.2.0"
 
 local running = false
 local progress: ((string) -> ())? = nil
 local onHung: ((string?) -> ())? = nil
 
 -- Matches Runner's client join timeout, plus slack for session startup and shutdown.
-local SESSION_OVERHEAD = 30 + 30
+local SESSION_OVERHEAD = 30 + 15
 
 local function round(n: number, places: number): number
 	local m = 10 ^ places
@@ -68,7 +70,8 @@ local function runSession(
 	module: ModuleScript,
 	session: Plan.Session,
 	runId: string,
-	position: string
+	position: string,
+	opts: RunOptions?
 ): { [string]: any }
 	local indices = {}
 	for _, t in session.tests do
@@ -80,6 +83,7 @@ local function runSession(
 		spec = module:GetFullName(),
 		tests = indices,
 		device = session.device,
+		failOnErrors = opts and opts.failOnErrors == true,
 	}
 	-- A session started right after the previous one ends sometimes returns nil at once
 	-- (old session processes still shutting down); a short pause avoids most of those.
@@ -105,9 +109,28 @@ local function runSession(
 			end
 		end
 	end)
+	local solo = opts ~= nil and opts.solo == true and session.players == 1
+	args.solo = solo
+	local simulator = game:GetService("StudioDeviceSimulatorService") :: any
+	local deviceBefore = nil
+	if solo and session.device then
+		pcall(function()
+			deviceBefore = simulator:GetDeviceAsync()
+		end)
+	end
 	local callOk, raw = pcall(function()
+		if solo then
+			-- Server and client run inside this Studio window, as with the Play button.
+			return StudioTestService:ExecutePlayModeAsync(args)
+		end
 		return StudioTestService:ExecuteMultiplayerTestAsync(session.players, args)
 	end)
+	if deviceBefore then
+		-- A solo session simulates the device in this window; put it back.
+		pcall(function()
+			simulator:SetDeviceAsync(deviceBefore)
+		end)
+	end
 	finished = true
 	if onHung then
 		onHung(nil)
@@ -182,7 +205,7 @@ function Launcher.run(opts: RunOptions?): { [string]: any }
 			while true do
 				attempts += 1
 				local attemptStarted = os.clock()
-				result = runSession(modules[session.specIndex], session, runId, `{i}/{#planned.sessions}`)
+				result = runSession(modules[session.specIndex], session, runId, `{i}/{#planned.sessions}`, opts)
 				-- Only retry sessions that never got to run tests (join timeouts, launch failures).
 				if result.status ~= "error" or attempts > retries then
 					break

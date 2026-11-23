@@ -2,7 +2,7 @@
 
 **End-to-end and multiplayer tests for Roblox games.** Write a spec once. Rehearse launches a real Studio test session with up to 8 clients, clicks your actual UI, types into text boxes, presses keys, walks characters around, checks server and client state, and gives you a pass/fail report. Run it from the toolbar, from a terminal or CI runner, or from an AI agent through the Studio MCP.
 
-> **Status: early (v0.1.0).** Works end to end on macOS with Studio 0.748. The API may still change before 1.0.
+> **Status: early (v0.2.0).** Works end to end on macOS with Studio 0.748. The API may still change before 1.0.
 
 ```lua
 -- ServerStorage/RehearseSpecs/Lobby (ModuleScript)
@@ -60,7 +60,10 @@ Declarations (`s`):
 | `s.isolated()` | Every test in this spec gets its own fresh session |
 | `s.devices({ "iphone_7", { id = "ipad_a16", orientation = "Portrait" } })` | Run the spec once per simulated device |
 | `s.beforeEach(fn)`, `s.afterEach(fn)` | Hooks around every test (`afterEach` runs even when the test fails) |
+| `s.beforeJoin(fn)` | Runs on the server before any client joins (setup, or tracing PlayerAdded/CharacterAdded). `t.log` goes to the session's `setupLogs` |
 | `s.client(name, fn)` | A function that runs **on the client**, called with `client:call(name, ...)` |
+| `s.failOnErrors()` | Fail a test if any game script logs an error during it (or `--fail-on-errors` for a whole run) |
+| `s.ignoreErrors({ "pattern", ... })` | Lua patterns for errors and warnings that aren't the game's fault |
 
 In a test (`t`):
 
@@ -69,9 +72,10 @@ In a test (`t`):
 | `t.client(i)` | The *i*-th client in join order. `.player` is its `Player` on the server |
 | `t.clients()`, `t.players()` | All client proxies / `Player`s |
 | `t.waitFor(fn, timeout?, description?)` | Polls a server-side predicate (default 5s) |
-| `t.expect(v).toBe / toEqual / toBeTruthy / toBeFalsy / toBeNear / toContain`, `.never.*` | Assertions |
+| `t.expect(v, label?).toBe / toEqual / toBeTruthy / toBeFalsy / toBeNear / toContain`, `.never.*` | Assertions |
 | `t.addPlayers(n)` | Adds players mid-session and returns their client proxies (experimental; see limitations) |
 | `t.device` | The simulated device for this session (`{ id, orientation? }`) or nil |
+| `t.gameErrors()` | Script errors logged so far in this test, from the server and every client |
 | `t.log(...)`, `t.wait(sec)` | Attach log lines to the result / sleep (prefer `waitFor`) |
 
 On a client (`local c = t.client(1)`). Every action waits for its target first:
@@ -85,8 +89,20 @@ On a client (`local c = t.client(1)`). Every action waits for its target first:
 | `c:waitFor(path, expected?, timeout?)` | Polls a client value until truthy or equal to `expected` |
 | `c:isVisible(path)`, `c:isInViewport(path)` | Rendered at all / rendered and fully on screen |
 | `c:character()`, `c:moveTo(Vector3, timeout?)` | Waits for the character / walks it there, returns final position |
+| `c:equip(name)`, `c:unequip()`, `c:activate({ hold? })` | Equip a Tool from the Backpack, unequip, activate the equipped tool |
+| `c:clickWorld(target)` | Clicks where a part, model, attachment (path) or `Vector3` is drawn on screen. Use it for tools that read the mouse |
+| `c:prompt(path, { walk? })` | Walks into range of a ProximityPrompt and holds it until it triggers |
+| `c:snapshot()` | What the player sees: visible UI (path, text, rect), position, health, tool, focused TextBox |
 | `c:call(name, ...)` | Runs a `s.client` function on that client and returns its result |
 | `c:leave()` | Disconnects the client and waits until the server sees it leave |
+
+Any other method name is sent to the client agent as a command, so `c:somethingNew()` fails with "unknown command" rather than silently doing nothing.
+
+### What a failing test reports
+Each test result also carries:
+- `gameErrors` and `gameWarnings`: anything game scripts logged during the test on the server or any client, prefixed `server:` or `client(i):`. Known Studio noise (other plugins' icons, asset loading) is ignored.
+- On the session: `startupErrors` and `startupWarnings`, for anything logged while the session started and players joined. A script that crashes at load shows up here, not as a pile of downstream errors.
+- `snapshot`, on failure only: for each client, the visible UI elements with their paths and text, the character position and health, the equipped tool and the focused TextBox. An agent can see why `click("PlayerGui.Shop.Buy")` failed (for example, the shop never opened) without a screenshot.
 
 Client paths are relative to `LocalPlayer` (`"PlayerGui.Menu.Play"`) unless they start with `game.` (`"game.Workspace.CurrentCamera.ViewportSize"`). The last segment can be a property or `@Attribute`.
 
@@ -100,8 +116,14 @@ Device ids come from `StudioDeviceSimulatorService:GetDeviceListAsync()`, for ex
   lune run cli/rehearse run build/Game.rbxlx --junit results.xml
   lune run cli/rehearse list build/Game.rbxlx --grep "lobby"      # what would run
   ```
-  Options: `--filter`, `--grep`, `--json`, `--junit`, `--report`, `--retries`, `--timeout`, `--stall`, `--studio`, `--keep-open`, `--quiet`. Exit codes: `0` passed, `1` failed, `2` couldn't run.
+  Options: `--filter`, `--grep`, `--fail-on-errors`, `--solo`, `--json`, `--junit`, `--report`, `--retries`, `--timeout`, `--stall`, `--studio`, `--keep-open`, `--quiet`. Exit codes: `0` passed, `1` failed, `2` couldn't run.
 - **AI agents (Studio MCP):** see [AGENTS.md](AGENTS.md).
+
+### Solo mode
+`--solo` (or `{ solo = true }` through the bridge) runs 1-player sessions as an ordinary Play test inside the Studio window, instead of a separate server and client. It's faster, and the Studio MCP can screenshot or record the client (`video_capture`). Notes:
+- The player is your signed-in Studio account, so your name and avatar appear in the game and in reports.
+- Studio throttles rendering when its window is in the background, so keep the window visible if you're recording.
+- Multi-player specs always use separate processes.
 
 ## How it works
 Studio loads plugins into every DataModel of a test session, so one plugin plays three roles:
@@ -122,7 +144,10 @@ The plugin asks for none: no HTTP and no script injection. The CLI runs Studio w
 - One run at a time per Studio instance (a `StudioTestService` limit).
 - Specs are loaded from a fresh copy each run. In Edit the copy isn't parented, so `require(script.Parent...)` from a spec only works inside sessions; reference shared helpers by absolute path (`game:GetService("ServerStorage").RehearseSpecs._Helpers`). Modules whose names start with `_` aren't treated as specs.
 - `s.client` functions are loaded on the client by requiring the spec there, so a spec that declares them must not `require` server-only modules at its top level.
-- `t.addPlayers` uses `StudioTestService:AddPlayers`. It works in the example spec, but it has a reported crash bug ([DevForum](https://devforum.roblox.com/t/4691976)), so treat it as experimental.
+- `t.addPlayers` uses `StudioTestService:AddPlayers`. It usually works in the example spec, but once in testing the session froze, consistent with the reported crash bug ([DevForum](https://devforum.roblox.com/t/4691976)). The watchdog recovered it. Give those tests `isolated = true`.
+- Test clients run in unfocused windows, and holding a key there doesn't register. `c:prompt` falls back to `ProximityPrompt:InputHoldBegin`, but `c:key(k, { hold })` for movement may not work. Use `c:moveTo` for walking.
+- VirtualInput has no touch input, so mobile tests check layout (`s.devices`, `isInViewport`) and drive input with mouse and keys.
+- If Studio crashes (for example in `AddPlayers`), it may show a dialog that blocks new Studio launches until you dismiss it. The CLI reports this within 60s.
 - The CLI is tested on macOS only. On Windows, Studio discovery and log paths are implemented but untested, and the CLI doesn't close Studio afterwards.
 - Studio's test sessions are occasionally flaky. During development, a session's second client sometimes never launched, and once a session never finished. Rehearse works around this in three ways, all recorded in the report:
   - It replaces clients that haven't appeared after 15s (`replacedClients`). This path hasn't been triggered in testing yet.

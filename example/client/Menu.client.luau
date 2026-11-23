@@ -55,6 +55,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if not processed and input.KeyCode == Enum.KeyCode.E then
 		wave:FireServer()
 	end
+	if not processed and input.KeyCode == Enum.KeyCode.Q then
+		error("Q is not implemented yet") -- a deliberate bug, caught by the Shop spec
+	end
 end)
 
 local function sync()

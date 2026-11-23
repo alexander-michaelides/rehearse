@@ -49,14 +49,24 @@ function Report.text(report: any): string
 			meta ..= `, {s.replacedClients} client(s) replaced`
 		end
 		table.insert(lines, `  {Report.sessionLabel(s)} [{meta}]{if s.error then " ERROR: " .. s.error else ""}`)
+		for _, e in s.startupErrors or {} do
+			table.insert(lines, `    startup script error: {e}`)
+		end
 		for _, t in s.tests or {} do
 			if t.status == "error" and s.error then
 				table.insert(lines, `    {ICON.error} {t.name} (not run)`)
 				continue
 			end
-			table.insert(lines, `    {ICON[t.status] or "?"} {t.name} ({t.ms or 0}ms)`)
+			local errCount = if t.gameErrors then #t.gameErrors else 0
+			local suffix = if errCount > 0 and t.status == "pass" then `, {errCount} game error(s)` else ""
+			table.insert(lines, `    {ICON[t.status] or "?"} {t.name} ({t.ms or 0}ms{suffix})`)
 			if t.error then
 				table.insert(lines, `        {t.error}`)
+			end
+			if t.status ~= "pass" and t.gameErrors then
+				for _, e in t.gameErrors do
+					table.insert(lines, `        script error: {e}`)
+				end
 			end
 			if t.status ~= "pass" and t.logs then
 				for _, l in t.logs do
@@ -119,6 +129,9 @@ function Report.junit(report: any): string
 				if t.logs then
 					table.insert(out, `      <system-out>{xmlEscape(table.concat(t.logs, "\n"))}</system-out>`)
 				end
+				if t.gameErrors then
+					table.insert(out, `      <system-err>{xmlEscape(table.concat(t.gameErrors, "\n"))}</system-err>`)
+				end
 				table.insert(out, `    </testcase>`)
 			end
 		end
@@ -129,6 +142,9 @@ function Report.junit(report: any): string
 					t.reason
 				)}"/></testcase>`
 			)
+		end
+		if session and session.startupErrors then
+			table.insert(out, `    <system-err>{xmlEscape(table.concat(session.startupErrors, "\n"))}</system-err>`)
 		end
 		table.insert(out, "  </testsuite>")
 	end

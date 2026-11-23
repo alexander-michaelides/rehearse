@@ -3,6 +3,32 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+### Added
+- Game script error capture. Each test lists the `gameErrors` and `gameWarnings` logged on the server and every client during it. Known Studio noise is ignored, and `s.ignoreErrors({...})` adds patterns.
+- `s.failOnErrors()` and the CLI's `--fail-on-errors` (bridge option `failOnErrors`) fail a test when game scripts log errors. `t.gameErrors()` reads them mid-test.
+- Failure snapshots: a failed test records what each client saw (visible UI with paths, text and rects; position, health, equipped tool, focused TextBox). Also available as `client:snapshot()`.
+- World and tool actions: `equip`, `unequip`, `activate`, `clickWorld` (parts, models, attachments or a Vector3) and `prompt` (walks into range and holds the ProximityPrompt, retrying until it triggers).
+- The client proxy passes any method through to the agent, so new commands don't need server-side wiring.
+- Example game: a coin pickup, a ProximityPrompt shop selling a Sword, a mouse-reading Paintbrush tool, a deliberate script error, and a Shop spec covering them.
+
+- `startupErrors`/`startupWarnings` on each session: errors logged while the session started and players joined, seeded from `LogService:GetLogHistory()` on the server and clients. Before this, a script that crashed at startup only showed its downstream errors.
+- Solo mode (`--solo`, bridge option `solo = true`): 1-player sessions run as an in-process Play test (`ExecutePlayModeAsync`) in the same Studio window. That's faster (Shop session: 9.6s instead of 14.3s), and the Studio MCP can screenshot or record the client. The player is the signed-in Studio user, not "Player1". A simulated device is restored afterwards.
+- `t.expect(value, label)`: an optional label that names the value in failure messages ("MatchStarted: expected: true to be false").
+- `s.beforeJoin(fn)`: runs on the server before any client joins, for setup or tracing. Its `t.log` lines go to the session's `setupLogs`.
+
+### Changed
+- The session watchdog's slack went from 60s to 45s, so stuck sessions are recovered sooner.
+- The CLI runs each session on a uniquely named temp copy of the place and removes that copy's auto-recovery files afterwards. Recovery files left by force-closed sessions could otherwise make Studio show a blocking "recover?" dialog.
+- The CLI fails within 60s with a clear message when Studio doesn't start (usually a dialog left open after a crash), instead of waiting for `--timeout`.
+- `click` no longer requires `Active = true` (players can press inactive buttons). Its failures now say why: doesn't exist, isn't rendered, or the centre is off screen.
+- `t.waitFor` keeps its timeout even when the predicate yields (for example `WaitForChild` inside it), and says so.
+- Snapshots skip Roblox's own ScreenGuis (Chat, BubbleChat, TouchGui and others).
+- The example `addPlayers` test is skipped by default, because `AddPlayers` can crash Studio's test server.
+
+### Fixed
+- Clicks and `isInViewport` were off by the top-bar inset for `IgnoreGuiInset` ScreenGuis. `AbsolutePosition` is measured below the top bar either way.
+
 ## [0.1.0] - 2026-11-22
 ### Added
 - Command-line runner (`lune run cli/rehearse run|list <place>`). It opens the place in Studio with `-task RunScript`, reads the report from Studio's log, and closes Studio and any leftover test windows. Supports `--json`, `--junit`, `--report`, `--filter`, `--grep`, `--retries`, `--timeout`, `--stall` and `--keep-open`. Exit codes: 0 passed, 1 failed, 2 couldn't run.

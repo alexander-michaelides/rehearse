@@ -33,9 +33,12 @@ export type SpecDecl = {
 	players: number,
 	isolated: boolean,
 	devices: { DeviceDecl },
+	beforeJoin: { TestFn },
 	beforeEach: { TestFn },
 	afterEach: { TestFn },
 	clientFns: { [string]: (...any) -> ...any },
+	failOnErrors: boolean,
+	ignoreErrors: { string },
 	tests: { TestDecl },
 }
 
@@ -75,9 +78,12 @@ function Spec.declare(name: string, specFn: any): SpecDecl
 		players = 1,
 		isolated = false,
 		devices = {},
+		beforeJoin = {},
 		beforeEach = {},
 		afterEach = {},
 		clientFns = {},
+		failOnErrors = false,
+		ignoreErrors = {},
 		tests = {},
 	}
 	local api = {}
@@ -107,6 +113,27 @@ function Spec.declare(name: string, specFn: any): SpecDecl
 
 	function api.device(d: any)
 		api.devices({ d })
+	end
+
+	-- Fail a test when any game script logs an error during it (server or client).
+	function api.failOnErrors()
+		decl.failOnErrors = true
+	end
+
+	-- Lua patterns for logged errors/warnings that aren't the game's fault.
+	function api.ignoreErrors(patterns: { string })
+		assert(type(patterns) == "table", "ignoreErrors needs a list of Lua patterns")
+		for _, pattern in patterns do
+			assert(type(pattern) == "string", "ignoreErrors patterns must be strings")
+			table.insert(decl.ignoreErrors, pattern)
+		end
+	end
+
+	-- Runs on the server when the session starts, before any client joins. Use it to set up
+	-- server state or watch PlayerAdded/CharacterAdded. t.log() lines go to the session's `setupLogs`.
+	function api.beforeJoin(fn: TestFn)
+		assert(type(fn) == "function", "beforeJoin needs a function")
+		table.insert(decl.beforeJoin, fn)
 	end
 
 	function api.beforeEach(fn: TestFn)
